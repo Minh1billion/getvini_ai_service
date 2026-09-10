@@ -84,16 +84,18 @@ pub fn tag(token: &str) -> Vec<(String, &'static str)> {
         result.push((chars[..start].iter().collect(), "PUNCT"));
     }
     if start < end {
-        let core: String = chars[start..end].iter().collect();
-        if core.contains('/') {
-            let parts: Vec<&str> = core.split('/').collect();
-            for (i, part) in parts.iter().enumerate() {
-                if i > 0 {
-                    result.push(("/".to_string(), "PUNCT"));
+        // Tach core thanh cac doan lien tuc: doan chu/so (alnum) va doan dau cau (punct).
+        // Vi du "mau#saii" hay "gia/ban-khong" deu bi tach theo tung dau cau nam ben trong,
+        // moi doan chu/so duoc kiem tra chinh ta rieng le thay vi gop chung thanh 1 tu vo nghia.
+        let core_chars = &chars[start..end];
+        let mut i = 0;
+        while i < core_chars.len() {
+            if core_chars[i].is_alphanumeric() {
+                let seg_start = i;
+                while i < core_chars.len() && core_chars[i].is_alphanumeric() {
+                    i += 1;
                 }
-                if part.is_empty() {
-                    continue;
-                }
+                let part: String = core_chars[seg_start..i].iter().collect();
                 let has_digit = part.chars().any(|c| c.is_ascii_digit());
                 let has_alpha = part.chars().any(|c| c.is_alphabetic());
                 let part_tag = if has_digit && has_alpha {
@@ -103,19 +105,15 @@ pub fn tag(token: &str) -> Vec<(String, &'static str)> {
                 } else {
                     "WORD"
                 };
-                result.push((part.to_string(), part_tag));
-            }
-        } else {
-            let has_digit = core.chars().any(|c| c.is_ascii_digit());
-            let has_alpha = core.chars().any(|c| c.is_alphabetic());
-            let core_tag = if has_digit && has_alpha {
-                "CODE"
-            } else if has_digit {
-                "NUMERIC"
+                result.push((part, part_tag));
             } else {
-                "WORD"
-            };
-            result.push((core, core_tag));
+                let seg_start = i;
+                while i < core_chars.len() && !core_chars[i].is_alphanumeric() {
+                    i += 1;
+                }
+                let part: String = core_chars[seg_start..i].iter().collect();
+                result.push((part, "PUNCT"));
+            }
         }
     }
     if end < chars.len() {

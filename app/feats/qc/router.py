@@ -1,18 +1,37 @@
 import asyncio
 import json
 import os
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from app.common import list_sheet_names, save_upload
 from app.feats.qc.llm_client import LLMClient
 from app.feats.qc.extract import extract_blocks
 from app.feats.qc.verify import verify_blocks
 from app.feats.qc.sheet_reader import read_sheet
+from app.feats.qc.pdf import build_qc_pdf
 
 router = APIRouter(prefix="/qc", tags=["qc"])
+
+
+class QcMismatch(BaseModel):
+    sheet_name: Optional[str] = None
+    product_ref: Optional[str] = None
+    attribute: Optional[str] = None
+    claimed_value: Optional[str] = None
+    expected_value: Optional[str] = None
+    status: Optional[str] = None
+    reasoning: Optional[str] = None
+    row_range: Optional[List[int]] = None
+
+
+class QcReportPdfRequest(BaseModel):
+    mismatches: List[QcMismatch] = []
+    sheets: List[str] = []
+    file_name: Optional[str] = None
 
 
 @router.post("/sheets")
@@ -93,3 +112,11 @@ async def qc_run(
         raise HTTPException(status_code=502, detail=f"Lỗi khi gọi LLM: {e}")
 
     return JSONResponse({"content_blocks": content_blocks, "mismatch_report": mismatch_report})
+
+
+@router.post("/report/pdf")
+async def qc_report_pdf(payload: QcReportPdfRequest):
+    mismatches = [m.model_dump() for m in payload.mismatches]
+    buffer = await asyncio.to_thread(build_qc_pdf, mismatches, payload.sheets, payload.file_name)
+    headers = {"Content-Disposition": 'attachment; filename="qc_report.pdf"'}
+    return StreamingResponse(buffer, media_type="application/pdf", headers=headers)

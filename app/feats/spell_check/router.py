@@ -13,13 +13,12 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 import structural as sc
 
 from app.common import SPREADSHEET_EXTS, list_sheet_names, resolve_sheet_names, save_upload
+from app.common_pdf import VN_FONT, VN_FONT_BOLD, ensure_vn_fonts
 
 router = APIRouter(prefix="/check", tags=["spellcheck"])
 
@@ -27,12 +26,7 @@ JOBS: dict = {}
 JOBS_LOCK = threading.Lock()
 CANCEL_EVENTS: dict = {}
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-FONT_DIR = os.path.join(BASE_DIR, "fonts")
-VN_FONT = "DejaVuSans"
-VN_FONT_BOLD = "DejaVuSans-Bold"
-pdfmetrics.registerFont(TTFont(VN_FONT, os.path.join(FONT_DIR, "DejaVuSans.ttf")))
-pdfmetrics.registerFont(TTFont(VN_FONT_BOLD, os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")))
+ensure_vn_fonts()
 
 
 def extract_units(path: str, ext: str, sheet_names: Optional[str]):

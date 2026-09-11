@@ -31,6 +31,16 @@ pub fn read_sheet(source: &str, sheet_name: &str) -> PyResult<String> {
 
     let mut result: Vec<Value> = Vec::new();
 
+    // `worksheet_range` trims to the sheet's used range, so `.rows().enumerate()`
+    // is 0-indexed relative to that range's own top-left corner — NOT the sheet's
+    // absolute row/col. If the data doesn't start at A1 (e.g. a title/blank row
+    // above the table, which is the common case), the enumerated index is smaller
+    // than the true absolute row/col by the range's offset, and every downstream
+    // "row N" reference (extraction, QC mismatches, cell highlighting) ends up
+    // shifted. We add the range's start offset back in so `row`/`col` are always
+    // absolute (0-indexed) sheet coordinates.
+    let (start_row, start_col) = range.start().unwrap_or((0, 0));
+
     for (row, cells) in range.rows().enumerate() {
         for (col, cell) in cells.iter().enumerate() {
             let value = match cell {
@@ -46,8 +56,8 @@ pub fn read_sheet(source: &str, sheet_name: &str) -> PyResult<String> {
             };
 
             result.push(json!({
-                "row": row,
-                "col": col,
+                "row": start_row as usize + row,
+                "col": start_col as usize + col,
                 "value": value
             }));
         }

@@ -1,10 +1,20 @@
 EXTRACT_SYSTEM = """Bạn phân tích nội dung một sheet Excel (mỗi dòng có prefix [row N]).
 Tách nội dung thành các content block, mỗi block là một ý/record liên quan đến sản phẩm hoặc thông tin cần QC.
+
 Với mỗi block trả về:
 - row_range: [start, end]
 - product_ref: tên sản phẩm được nhắc tới, hoặc null nếu không rõ
 - claims: danh sách {"attribute": "...", "value": "..."} (giá, số lượng, deal, tính năng, vị, trọng lượng...)
 - summary: tóm tắt ngắn gọn 1 câu
+
+QUAN TRỌNG về row_range:
+- Chỉ lấy đúng các dòng thực sự chứa thông tin của block.
+- row_range phải là phạm vi NHỎ NHẤT đủ để chứa product_ref và claims.
+- Nếu thông tin nằm trên 1 dòng thì bắt buộc [N, N].
+- Không trùm cả bảng/section.
+- Không đưa header, dòng trống, hoặc dòng không liên quan vào range.
+- Mọi claim phải có nội dung tương ứng trong row_range.
+
 Bỏ qua dòng chỉ là header, số thứ tự, hoặc không liên quan sản phẩm.
 Chỉ trả JSON theo format: {"blocks": [...]}. Không giải thích thêm."""
 

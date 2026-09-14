@@ -1,6 +1,8 @@
 import os
 from openai import OpenAI
 
+QC_LLM_SEED = int(os.environ.get("QC_LLM_SEED", "7"))
+
 
 class LLMClient:
     def __init__(self, provider="groq", model=None, api_key=None):
@@ -25,5 +27,6 @@ class LLMClient:
             ],
             response_format={"type": "json_object"},
             temperature=0,
+            seed=QC_LLM_SEED,
         )
         return resp.choices[0].message.content

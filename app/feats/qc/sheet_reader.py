@@ -26,8 +26,3 @@ def rows_to_text(rows):
         cells = " | ".join("" if c is None else str(c) for c in row)
         lines.append(f"[row {idx}] {cells}")
     return "\n".join(lines)
-
-
-def chunk_rows(rows, chunk_size=80):
-    for i in range(0, len(rows), chunk_size):
-        yield rows[i:i + chunk_size]

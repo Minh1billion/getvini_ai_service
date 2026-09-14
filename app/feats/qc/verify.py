@@ -1,5 +1,8 @@
 import json
+from app.feats.qc import cache
 from app.feats.qc.prompts import VERIFY_SYSTEM
+
+VERIFY_PROMPT_VERSION = "v1"
 
 
 def verify_blocks(llm, blocks, product_info, batch_size=20):
@@ -10,7 +13,15 @@ def verify_blocks(llm, blocks, product_info, batch_size=20):
             {"content_blocks": batch, "product_info": product_info},
             ensure_ascii=False,
         )
-        raw = llm.complete_json(VERIFY_SYSTEM, user)
+
+        key = cache.make_key(
+            "verify", VERIFY_PROMPT_VERSION, llm.provider, llm.model, VERIFY_SYSTEM, user
+        )
+        raw = cache.get(key)
+        if raw is None:
+            raw = llm.complete_json(VERIFY_SYSTEM, user)
+            cache.set(key, raw)
+
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:

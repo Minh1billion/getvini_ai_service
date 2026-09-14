@@ -44,7 +44,6 @@ async def qc_run(
     provider: str = Form("groq"),
     model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
-    chunk_size: int = Form(80),
     batch_size: int = Form(20),
 ):
     if not file and not url:
@@ -87,7 +86,7 @@ async def qc_run(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        content_blocks = await asyncio.to_thread(extract_blocks, llm, rows, chunk_size)
+        content_blocks = await asyncio.to_thread(extract_blocks, llm, rows)
         mismatch_report = await asyncio.to_thread(verify_blocks, llm, content_blocks["blocks"], info, batch_size)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Lỗi khi gọi LLM: {e}")

@@ -14,6 +14,9 @@ from app.feats.qc.sheet_reader import read_sheet
 
 router = APIRouter(prefix="/qc", tags=["qc"])
 
+DEFAULT_EXTRACT_MODEL = os.environ.get("QC_EXTRACT_MODEL", "openai/gpt-oss-20b")
+DEFAULT_VERIFY_MODEL = os.environ.get("QC_VERIFY_MODEL", "openai/gpt-oss-120b")
+
 
 @router.post("/sheets")
 async def qc_sheets(
@@ -43,6 +46,8 @@ async def qc_run(
     product_info_file: Optional[UploadFile] = File(None),
     provider: str = Form("groq"),
     model: Optional[str] = Form(None),
+    extract_model: Optional[str] = Form(None),
+    verify_model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
     batch_size: int = Form(20),
 ):
@@ -81,14 +86,19 @@ async def qc_run(
                 pass
 
     try:
-        llm = LLMClient(provider=provider, model=model, api_key=api_key)
+        extract_llm = LLMClient(provider=provider, model=extract_model or model or DEFAULT_EXTRACT_MODEL, api_key=api_key)
+        verify_llm = LLMClient(provider=provider, model=verify_model or model or DEFAULT_VERIFY_MODEL, api_key=api_key)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        content_blocks = await asyncio.to_thread(extract_blocks, llm, rows)
-        mismatch_report = await asyncio.to_thread(verify_blocks, llm, content_blocks["blocks"], info, batch_size)
+        content_blocks = await asyncio.to_thread(extract_blocks, extract_llm, rows)
+        mismatch_report = await asyncio.to_thread(verify_blocks, verify_llm, content_blocks["blocks"], info, batch_size)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Lỗi khi gọi LLM: {e}")
 
-    return JSONResponse({"content_blocks": content_blocks, "mismatch_report": mismatch_report})
+    return JSONResponse({
+        "content_blocks": content_blocks,
+        "mismatch_report": mismatch_report,
+        "models": {"extract": extract_llm.model, "verify": verify_llm.model},
+    })

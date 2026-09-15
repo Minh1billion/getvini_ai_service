@@ -13,6 +13,7 @@ app.include_router(qc_router)
 async def health():
     return {"status": "ok"}
 
-@app.head()
-async def health():
+@app.get("/")
+@app.head("/")
+async def root():
     return {"status": "ok"}

@@ -101,7 +101,6 @@ def scan_scenarios(rows):
             vals = rows_map.get(r, [])
             values_from_header = vals[header_col:]
 
-            # Hàng hoàn toàn rỗng → kết thúc vùng dữ liệu
             if not any(_has_value(v) for v in values_from_header):
                 break
 

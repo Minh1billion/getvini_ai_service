@@ -22,7 +22,7 @@ import structural as sc
 
 from app.common import SPREADSHEET_EXTS, list_sheet_names, resolve_sheet_names, save_upload
 from app.feats.qc.sheet_reader import read_sheet, list_sheets_with_scenarios
-from app.feats.common.script_scanner import scan_units, scan_sheet
+from app.feats.common.script_scanner import scan_sheet_units, scan_sheet
 
 logger = logging.getLogger("spellcheck.router")
 
@@ -43,20 +43,16 @@ pdfmetrics.registerFont(TTFont(VN_FONT_BOLD, os.path.join(FONT_DIR, "DejaVuSans-
 def extract_units(path: str, ext: str, sheet_names: Optional[str], scenario_ids: Optional[str] = None):
     units = []
     scanned_scenarios = []
-    selected_scenario_ids = (
-        {s.strip() for s in scenario_ids.split(",") if s.strip()}
-        if scenario_ids else None
-    )
     if ext in SPREADSHEET_EXTS:
         selected_sheets = resolve_sheet_names(path, sheet_names)
         multi = len(selected_sheets) > 1
         for sheet in selected_sheets:
             rows = read_sheet(path, sheet)
-            units.extend(scan_units(sheet, rows, multi, selected_scenario_ids))
+            units.extend(scan_sheet_units(sheet, rows, multi))
             scanned_scenarios.extend(scan_sheet(sheet, rows))
         logger.info(
-            "[SCENARIO_DEBUG] extract_units requested_sheet_names=%s resolved_sheets=%s requested_scenario_ids=%s total_units=%s",
-            sheet_names, selected_sheets, selected_scenario_ids, len(units),
+            "[SHEET_DEBUG] extract_units requested_sheet_names=%s resolved_sheets=%s total_units=%s",
+            sheet_names, selected_sheets, len(units),
         )
     else:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:

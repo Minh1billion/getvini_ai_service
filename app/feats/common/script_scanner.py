@@ -175,6 +175,25 @@ def scan_sheet(sheet_name, rows):
     ]
 
 
+def scan_sheet_units(sheet_name, rows, multi_sheet):
+    units = []
+    for r, vals in rows:
+        for c, v in enumerate(vals):
+            if not _has_value(v):
+                continue
+            location = f"R{r}C{c + 1}"
+            if multi_sheet:
+                location = f"{sheet_name}!{location}"
+            units.append({
+                "location": location,
+                "text": str(v),
+                "sheet": sheet_name,
+                "scenario": None,
+                "scenarioId": None,
+            })
+    return units
+
+
 def scan_units(sheet_name, rows, multi_sheet, scenario_ids=None):
     units = []
     current_ids = []

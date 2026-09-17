@@ -20,6 +20,16 @@ def read_sheet(source, sheet_name):
     return rows
 
 
+def list_sheets_with_scenarios(path, names):
+    from app.feats.common.script_scanner import scan_sheet
+
+    result = {}
+    for name in names:
+        rows = read_sheet(path, name)
+        result[name] = scan_sheet(name, rows)
+    return result
+
+
 def rows_to_text(rows):
     lines = []
     for idx, row in rows:

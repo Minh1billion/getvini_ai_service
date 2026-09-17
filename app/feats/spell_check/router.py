@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import logging
 import os
 import threading
 import time
@@ -20,6 +21,10 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 import structural as sc
 
 from app.common import SPREADSHEET_EXTS, list_sheet_names, resolve_sheet_names, save_upload
+from app.feats.qc.sheet_reader import read_sheet, list_sheets_with_scenarios
+from app.feats.common.script_scanner import scan_units, scan_sheet
+
+logger = logging.getLogger("spellcheck.router")
 
 router = APIRouter(prefix="/check", tags=["spellcheck"])
 
@@ -35,37 +40,47 @@ pdfmetrics.registerFont(TTFont(VN_FONT, os.path.join(FONT_DIR, "DejaVuSans.ttf")
 pdfmetrics.registerFont(TTFont(VN_FONT_BOLD, os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")))
 
 
-def extract_units(path: str, ext: str, sheet_names: Optional[str]):
+def extract_units(path: str, ext: str, sheet_names: Optional[str], scenario_ids: Optional[str] = None):
     units = []
+    scanned_scenarios = []
+    selected_scenario_ids = (
+        {s.strip() for s in scenario_ids.split(",") if s.strip()}
+        if scenario_ids else None
+    )
     if ext in SPREADSHEET_EXTS:
         selected_sheets = resolve_sheet_names(path, sheet_names)
         multi = len(selected_sheets) > 1
         for sheet in selected_sheets:
-            raw = sc.read_sheet(path, sheet)
-            for entry in json.loads(raw):
-                location = f"R{entry['row'] + 1}C{entry['col'] + 1}"
-                if multi:
-                    location = f"{sheet}!{location}"
-                value = str(entry.get("value", ""))
-                if value.strip():
-                    units.append((location, value))
+            rows = read_sheet(path, sheet)
+            units.extend(scan_units(sheet, rows, multi, selected_scenario_ids))
+            scanned_scenarios.extend(scan_sheet(sheet, rows))
+        logger.info(
+            "[SCENARIO_DEBUG] extract_units requested_sheet_names=%s resolved_sheets=%s requested_scenario_ids=%s total_units=%s",
+            sheet_names, selected_sheets, selected_scenario_ids, len(units),
+        )
     else:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for i, line in enumerate(f):
                 line = line.rstrip("\n")
                 if line.strip():
-                    units.append((f"L{i + 1}", line))
-    return units
+                    units.append({"location": f"L{i + 1}", "text": line, "sheet": None, "scenario": None, "scenarioId": None})
+    return units, scanned_scenarios
 
 
-def check_unit(location: str, text: str, whitelist: list, lang: str):
+def check_unit(unit: dict, whitelist: list, lang: str):
     errors = []
-    for token in sc.tokenize(text):
+    for token in sc.tokenize(unit["text"]):
         for sub, tag in sc.tag(token):
             if tag != "WORD":
                 continue
             if sc.check(sub, whitelist, lang):
-                errors.append({"location": location, "token": sub})
+                errors.append({
+                    "location": unit["location"],
+                    "token": sub,
+                    "sheet": unit.get("sheet"),
+                    "scenario": unit.get("scenario"),
+                    "scenarioId": unit.get("scenarioId"),
+                })
     return errors
 
 
@@ -82,10 +97,10 @@ def process_job(job_id: str, units: list, whitelist: list, lang: str, cancel_eve
     step = max(1, total // 100)
     processed = 0
     errors = []
-    for location, text in units:
+    for unit in units:
         if cancel_event.is_set():
             return
-        errors.extend(check_unit(location, text, whitelist, lang))
+        errors.extend(check_unit(unit, whitelist, lang))
         processed += 1
         if processed % step == 0 or processed == total:
             with JOBS_LOCK:
@@ -175,7 +190,8 @@ async def check_sheets(file: UploadFile = File(...)):
         if ext not in SPREADSHEET_EXTS:
             return JSONResponse({"sheets": []})
         names = await asyncio.to_thread(list_sheet_names, path)
-        return JSONResponse({"sheets": names})
+        scenarios = await asyncio.to_thread(list_sheets_with_scenarios, path, names)
+        return JSONResponse({"sheets": names, "scenarios": scenarios})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:
@@ -188,12 +204,13 @@ async def check_start(
     lang: str = Form("both"),
     sheet_names: Optional[str] = Form(None),
     whitelist: Optional[str] = Form(None),
+    scenario_ids: Optional[str] = Form(None),
 ):
     path, ext = await save_upload(file)
     wl = [w.strip() for w in whitelist.split(",")] if whitelist else []
 
     try:
-        units = await asyncio.to_thread(extract_units, path, ext, sheet_names)
+        units, scanned_scenarios = await asyncio.to_thread(extract_units, path, ext, sheet_names, scenario_ids)
     except Exception as e:
         os.remove(path)
         raise HTTPException(status_code=400, detail=str(e))
@@ -201,7 +218,7 @@ async def check_start(
     job_id = uuid.uuid4().hex
     cancel_event = threading.Event()
     with JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "processed": 0, "total": len(units), "progress": 0.0, "errors": [], "created_at": time.time()}
+        JOBS[job_id] = {"status": "running", "processed": 0, "total": len(units), "progress": 0.0, "errors": [], "scanned_scenarios": scanned_scenarios, "created_at": time.time()}
         CANCEL_EVENTS[job_id] = cancel_event
 
     thread = threading.Thread(target=run_job_in_background, args=(job_id, path, units, wl, lang, cancel_event), daemon=True)
@@ -216,12 +233,13 @@ async def check_stream(
     lang: str = Form("both"),
     sheet_names: Optional[str] = Form(None),
     whitelist: Optional[str] = Form(None),
+    scenario_ids: Optional[str] = Form(None),
 ):
     path, ext = await save_upload(file)
     wl = [w.strip() for w in whitelist.split(",")] if whitelist else []
 
     try:
-        units = await asyncio.to_thread(extract_units, path, ext, sheet_names)
+        units, scanned_scenarios = await asyncio.to_thread(extract_units, path, ext, sheet_names, scenario_ids)
     except Exception as e:
         os.remove(path)
         raise HTTPException(status_code=400, detail=str(e))
@@ -229,7 +247,7 @@ async def check_stream(
     job_id = uuid.uuid4().hex
     cancel_event = threading.Event()
     with JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "processed": 0, "total": len(units), "progress": 0.0, "errors": [], "created_at": time.time()}
+        JOBS[job_id] = {"status": "running", "processed": 0, "total": len(units), "progress": 0.0, "errors": [], "scanned_scenarios": scanned_scenarios, "created_at": time.time()}
         CANCEL_EVENTS[job_id] = cancel_event
 
     async def event_source():
@@ -273,7 +291,8 @@ async def check_stream(
 @router.post("/text")
 async def check_text(text: str = Form(...), lang: str = Form("vi"), whitelist: Optional[str] = Form(None)):
     wl = [w.strip() for w in whitelist.split(",")] if whitelist else []
-    errors = await asyncio.to_thread(check_unit, "text", text, wl, lang)
+    unit = {"location": "text", "text": text, "sheet": None, "scenario": None, "scenarioId": None}
+    errors = await asyncio.to_thread(check_unit, unit, wl, lang)
     return JSONResponse({"errors": errors})
 
 
@@ -289,6 +308,7 @@ async def get_job(job_id: str):
         "total": job["total"],
         "progress": job["progress"],
         "errors": job["errors"],
+        "scanned_scenarios": job.get("scanned_scenarios", []),
         "error": job.get("error"),
     })
 

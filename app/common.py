@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 import xml.etree.ElementTree as ET
@@ -5,6 +6,8 @@ import zipfile
 from typing import Optional
 
 from fastapi import HTTPException, UploadFile
+
+logger = logging.getLogger("common.sheets")
 
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 CHUNK_SIZE = 1024 * 1024

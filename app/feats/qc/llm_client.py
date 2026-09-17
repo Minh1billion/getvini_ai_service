@@ -1,7 +1,10 @@
+import logging
 import os
 import re
 import time
 from openai import OpenAI, BadRequestError, RateLimitError
+
+logger = logging.getLogger("qc.llm")
 
 QC_LLM_SEED = int(os.environ.get("QC_LLM_SEED", "7"))
 QC_LLM_MAX_RETRIES = int(os.environ.get("QC_LLM_MAX_RETRIES", "3"))
@@ -55,17 +58,24 @@ class LLMClient:
                     seed=QC_LLM_SEED,
                     **kwargs,
                 )
-                return resp.choices[0].message.content
+                content = resp.choices[0].message.content
+                logger.info("QC LLM response (provider=%s, model=%s): %s", self.provider, self.model, content)
+                return content
             except RateLimitError as e:
                 rate_limit_attempt += 1
                 wait_s = _parse_retry_seconds(str(e))
                 if rate_limit_attempt > QC_LLM_MAX_RETRIES or wait_s is None or wait_s > QC_LLM_MAX_WAIT_SECONDS:
+                    logger.error("QC LLM rate limit exceeded: %s", e)
                     raise
+                logger.warning("QC LLM rate limited, retrying in %.1fs: %s", wait_s, e)
                 time.sleep(wait_s)
             except BadRequestError as e:
                 if getattr(e, "code", None) != "json_validate_failed":
+                    logger.error("QC LLM request failed: %s", e)
                     raise
                 json_attempt += 1
                 if json_attempt > QC_LLM_JSON_RETRIES:
+                    logger.error("QC LLM failed to produce valid JSON after %d attempts: %s", json_attempt, e)
                     raise
+                logger.warning("QC LLM returned invalid JSON, retrying (attempt %d): %s", json_attempt, e)
                 time.sleep(1)

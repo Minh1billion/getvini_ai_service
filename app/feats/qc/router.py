@@ -8,13 +8,12 @@ from fastapi.responses import JSONResponse
 
 from app.common import list_sheet_names, save_upload
 from app.feats.qc.llm_client import LLMClient
-from app.feats.qc.extract import extract_blocks
 from app.feats.qc.verify import verify_blocks
-from app.feats.qc.sheet_reader import read_sheet
+from app.feats.qc.sheet_reader import read_sheet, list_sheets_with_scenarios
+from app.feats.common.script_scanner import scan_sheet, scan_content_blocks
 
 router = APIRouter(prefix="/qc", tags=["qc"])
 
-DEFAULT_EXTRACT_MODEL = os.environ.get("QC_EXTRACT_MODEL", "openai/gpt-oss-20b")
 DEFAULT_VERIFY_MODEL = os.environ.get("QC_VERIFY_MODEL", "openai/gpt-oss-120b")
 
 
@@ -27,7 +26,8 @@ async def qc_sheets(
         path, ext = await save_upload(file)
         try:
             names = await asyncio.to_thread(list_sheet_names, path)
-            return JSONResponse({"sheets": names})
+            scenarios = await asyncio.to_thread(list_sheets_with_scenarios, path, names)
+            return JSONResponse({"sheets": names, "scenarios": scenarios})
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
         finally:
@@ -46,11 +46,15 @@ async def qc_run(
     product_info_file: Optional[UploadFile] = File(None),
     provider: str = Form("groq"),
     model: Optional[str] = Form(None),
-    extract_model: Optional[str] = Form(None),
     verify_model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
     batch_size: int = Form(20),
+    scenario_ids: Optional[str] = Form(None),
 ):
+    selected_scenario_ids = (
+        {s.strip() for s in scenario_ids.split(",") if s.strip()}
+        if scenario_ids else None
+    )
     if not file and not url:
         raise HTTPException(status_code=400, detail="Cần cung cấp file hoặc url")
 
@@ -86,19 +90,40 @@ async def qc_run(
                 pass
 
     try:
-        extract_llm = LLMClient(provider=provider, model=extract_model or model or DEFAULT_EXTRACT_MODEL, api_key=api_key)
         verify_llm = LLMClient(provider=provider, model=verify_model or model or DEFAULT_VERIFY_MODEL, api_key=api_key)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    content_blocks = await asyncio.to_thread(scan_content_blocks, sheet_name, rows, selected_scenario_ids)
+    scanned_scenarios = await asyncio.to_thread(scan_sheet, sheet_name, rows)
+
+    if not content_blocks:
+        return JSONResponse({
+            "content_blocks": content_blocks,
+            "scanned_scenarios": scanned_scenarios,
+            "mismatch_report": {"mismatches": []},
+            "models": {"verify": verify_llm.model},
+        })
+
     try:
-        content_blocks = await asyncio.to_thread(extract_blocks, extract_llm, rows)
-        mismatch_report = await asyncio.to_thread(verify_blocks, verify_llm, content_blocks["blocks"], info, batch_size)
+        mismatch_report = await asyncio.to_thread(verify_blocks, verify_llm, content_blocks, info, batch_size)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Lỗi khi gọi LLM: {e}")
 
+    blocks_by_range = {(b["sheet"], b["row_range"][0], b["row_range"][1]): b for b in content_blocks}
+    for m in mismatch_report.get("mismatches", []):
+        row_range = m.get("row_range")
+        key = (sheet_name, row_range[0], row_range[1]) if isinstance(row_range, list) and len(row_range) == 2 else None
+        matched = blocks_by_range.get(key) if key else None
+        m["sheet"] = sheet_name
+        if matched:
+            m["id"] = matched["id"]
+            m["scenario"] = matched["scenario"]
+            m["row_range"] = matched["row_range"]
+
     return JSONResponse({
         "content_blocks": content_blocks,
+        "scanned_scenarios": scanned_scenarios,
         "mismatch_report": mismatch_report,
-        "models": {"extract": extract_llm.model, "verify": verify_llm.model},
+        "models": {"verify": verify_llm.model},
     })

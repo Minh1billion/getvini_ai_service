@@ -4,4 +4,3 @@ python-multipart
 reportlab
 openai
 pydantic-settings
-pytest

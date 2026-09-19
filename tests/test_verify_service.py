@@ -1,11 +1,14 @@
 import json
 
 from app.domain.qc.verify_service import (
+    _JSON_WRAPPER_TOKENS,
     annotate_mismatches,
     pack_batches,
     verify_blocks,
     verify_blocks_stream,
 )
+from app.infra.llm.prompts import VERIFY_SYSTEM
+from app.infra.llm.tokens import estimate_tokens
 
 
 class FakeLLM:
@@ -84,7 +87,15 @@ def test_pack_batches_always_at_least_1_scenario_even_if_it_alone_overflows_budg
 
 
 def test_pack_batches_shrinks_below_max_when_window_is_tight():
-    batches = pack_batches(blocks(8), [], context_window=1764, reserved_output_tokens=0)
+    sample = blocks(8)
+    block_tokens = max(estimate_tokens(json.dumps(b, ensure_ascii=False)) for b in sample)
+    fixed_overhead = (
+        estimate_tokens(VERIFY_SYSTEM)
+        + estimate_tokens(json.dumps([], ensure_ascii=False))
+        + _JSON_WRAPPER_TOKENS
+    )
+    context_window = fixed_overhead + 3 * block_tokens + block_tokens // 2
+    batches = pack_batches(sample, [], context_window=context_window, reserved_output_tokens=0)
     assert sum(len(b) for b in batches) == 8
     assert all(1 <= len(b) <= 3 for b in batches)
     assert len(batches) == 3

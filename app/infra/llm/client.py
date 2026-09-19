@@ -1,15 +1,12 @@
 import logging
-import os
 import re
 import time
-from openai import OpenAI, BadRequestError, RateLimitError
+
+from openai import BadRequestError, OpenAI, RateLimitError
+
+from app.core.config import get_settings
 
 logger = logging.getLogger("qc.llm")
-
-QC_LLM_SEED = int(os.environ.get("QC_LLM_SEED", "7"))
-QC_LLM_MAX_RETRIES = int(os.environ.get("QC_LLM_MAX_RETRIES", "3"))
-QC_LLM_MAX_WAIT_SECONDS = float(os.environ.get("QC_LLM_MAX_WAIT_SECONDS", "30"))
-QC_LLM_JSON_RETRIES = int(os.environ.get("QC_LLM_JSON_RETRIES", "2"))
 
 
 def _parse_retry_seconds(message):
@@ -27,19 +24,21 @@ def _is_gpt_oss(model):
 
 class LLMClient:
     def __init__(self, provider="groq", model=None, api_key=None):
+        settings = get_settings()
         self.provider = provider
         if provider == "groq":
-            key = api_key or os.environ.get("GROQ_API_KEY")
+            key = api_key or settings.groq_api_key
             self.client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
             self.model = model or "openai/gpt-oss-120b"
         elif provider == "openai":
-            key = api_key or os.environ.get("OPENAI_API_KEY")
+            key = api_key or settings.openai_api_key
             self.client = OpenAI(api_key=key)
             self.model = model or "gpt-4o-mini"
         else:
             raise ValueError(f"unknown provider: {provider}")
 
     def complete_json(self, system, user):
+        settings = get_settings()
         rate_limit_attempt = 0
         json_attempt = 0
         while True:
@@ -55,7 +54,7 @@ class LLMClient:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0,
-                    seed=QC_LLM_SEED,
+                    seed=settings.qc_llm_seed,
                     **kwargs,
                 )
                 content = resp.choices[0].message.content
@@ -64,7 +63,7 @@ class LLMClient:
             except RateLimitError as e:
                 rate_limit_attempt += 1
                 wait_s = _parse_retry_seconds(str(e))
-                if rate_limit_attempt > QC_LLM_MAX_RETRIES or wait_s is None or wait_s > QC_LLM_MAX_WAIT_SECONDS:
+                if rate_limit_attempt > settings.qc_llm_max_retries or wait_s is None or wait_s > settings.qc_llm_max_wait_seconds:
                     logger.error("QC LLM rate limit exceeded: %s", e)
                     raise
                 logger.warning("QC LLM rate limited, retrying in %.1fs: %s", wait_s, e)
@@ -74,7 +73,7 @@ class LLMClient:
                     logger.error("QC LLM request failed: %s", e)
                     raise
                 json_attempt += 1
-                if json_attempt > QC_LLM_JSON_RETRIES:
+                if json_attempt > settings.qc_llm_json_retries:
                     logger.error("QC LLM failed to produce valid JSON after %d attempts: %s", json_attempt, e)
                     raise
                 logger.warning("QC LLM returned invalid JSON, retrying (attempt %d): %s", json_attempt, e)

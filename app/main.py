@@ -1,21 +1,31 @@
-import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.feats.qc.router import router as qc_router
-from app.feats.spell_check.router import router as spell_check_router
+from app.api.qc_router import router as qc_router
+from app.api.spellcheck_router import router as spellcheck_router
+from app.core.logging import setup_logging
+from app.domain.spellcheck.service import register_dictionaries
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+setup_logging()
 
-app = FastAPI(title="AI Service")
 
-app.include_router(spell_check_router)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    register_dictionaries()
+    yield
+
+
+app = FastAPI(title="AI Service", lifespan=lifespan)
+
+app.include_router(spellcheck_router)
 app.include_router(qc_router)
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
 
 @app.get("/")
 @app.head("/")

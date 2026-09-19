@@ -3,4 +3,5 @@ uvicorn[standard]
 python-multipart
 reportlab
 openai
-python-dotenv
+pydantic-settings
+pytest

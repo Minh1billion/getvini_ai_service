@@ -1,14 +1,15 @@
+use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 
+mod grid_scan;
 mod io;
-mod spellcheck;
+mod lookup;
 mod tagger;
 mod tokenizer;
 
 #[pymodule]
 mod structural {
     use super::*;
-    use std::collections::HashSet;
 
     #[pyfunction]
     fn read_sheet(source: &str, sheet_name: &str) -> PyResult<String> {
@@ -26,9 +27,18 @@ mod structural {
     }
 
     #[pyfunction]
-    #[pyo3(signature = (token, whitelist, lang="both"))]
-    fn check(token: &str, whitelist: Vec<String>, lang: &str) -> bool {
-        let whitelist: HashSet<String> = whitelist.into_iter().collect();
-        spellcheck::spellcheck(token, &whitelist, lang)
+    fn register_set(name: &str, path: &str) -> PyResult<usize> {
+        lookup::register_set(name, path).map_err(|e| PyIOError::new_err(format!("{path}: {e}")))
+    }
+
+    #[pyfunction]
+    #[pyo3(signature = (token, set_names, ci=true))]
+    fn contains_any(token: &str, set_names: Vec<String>, ci: bool) -> bool {
+        lookup::contains_any(token, &set_names, ci)
+    }
+
+    #[pyfunction]
+    fn scan_marker_blocks(rows_json: &str, pattern: &str) -> PyResult<String> {
+        grid_scan::scan_marker_blocks(rows_json, pattern).map_err(PyValueError::new_err)
     }
 }

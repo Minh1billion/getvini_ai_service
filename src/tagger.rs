@@ -53,10 +53,10 @@ pub fn tag(token: &str) -> Vec<(String, &'static str)> {
         return vec![(token.to_string(), "NUMERIC")];
     }
 
-    if let Ok(number) = phonenumber::parse(Some(phonenumber::country::VN), token) {
-        if number.is_valid() {
-            return vec![(token.to_string(), "PHONE")];
-        }
+    if let Ok(number) = phonenumber::parse(Some(phonenumber::country::VN), token)
+        && number.is_valid()
+    {
+        return vec![(token.to_string(), "PHONE")];
     }
 
     let units = [

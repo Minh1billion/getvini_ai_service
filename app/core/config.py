@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     qc_llm_json_retries: int = 2
     qc_cache_db: str = str(BASE_DIR / "qc_cache.sqlite3")
 
+    qc_llm_context_window: int = 8000
+    qc_llm_reserved_output_tokens: int = 1500
+    qc_llm_min_scenarios_per_batch: int = 1
+    qc_llm_max_scenarios_per_batch: int = 4
+
 
 @lru_cache
 def get_settings() -> Settings:

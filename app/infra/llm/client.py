@@ -23,19 +23,30 @@ def _is_gpt_oss(model):
 
 
 class LLMClient:
-    def __init__(self, provider="groq", model=None, api_key=None):
+    def __init__(self, provider=None, model=None, api_key=None):
         settings = get_settings()
-        self.provider = provider
-        if provider == "groq":
+        self.provider = provider or settings.qc_default_provider
+        if self.provider == "groq":
             key = api_key or settings.groq_api_key
             self.client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
-            self.model = model or "openai/gpt-oss-120b"
-        elif provider == "openai":
+            self.model = model or settings.qc_model_groq
+        elif self.provider == "openai":
             key = api_key or settings.openai_api_key
             self.client = OpenAI(api_key=key)
-            self.model = model or "gpt-4o-mini"
+            self.model = model or settings.qc_model_openai
+        elif self.provider == "openrouter":
+            key = api_key or settings.openrouter_api_key
+            self.client = OpenAI(
+                api_key=key,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "https://getvini.com",
+                    "X-Title": "Getvini QC",
+                },
+            )
+            self.model = model or settings.qc_model_openrouter
         else:
-            raise ValueError(f"unknown provider: {provider}")
+            raise ValueError(f"unknown provider: {self.provider}")
 
     def complete_json(self, system, user):
         settings = get_settings()

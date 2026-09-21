@@ -147,55 +147,6 @@ def verify_blocks(
     return {"mismatches": all_mismatches}
 
 
-def verify_blocks_stream(
-    llm,
-    blocks,
-    product_info,
-    cache=None,
-    *,
-    context_window=None,
-    reserved_output_tokens=None,
-    min_scenarios_per_batch=None,
-    max_scenarios_per_batch=None,
-):
-    cache = cache or cache_mod.get_cache()
-    batches = pack_batches(
-        blocks,
-        product_info,
-        VERIFY_SYSTEM,
-        context_window=context_window,
-        reserved_output_tokens=reserved_output_tokens,
-        min_scenarios_per_batch=min_scenarios_per_batch,
-        max_scenarios_per_batch=max_scenarios_per_batch,
-    )
-    total_batches = len(batches)
-    all_mismatches = []
-
-    for i, batch in enumerate(batches):
-        try:
-            mismatches, cached, _raw = _call_batch(llm, batch, product_info, cache)
-        except Exception as e:
-            logger.error("QC verify batch %d/%d lỗi: %s", i + 1, total_batches, e)
-            yield {
-                "batch_index": i,
-                "total_batches": total_batches,
-                "scenario_ids": [b["id"] for b in batch],
-                "error": str(e),
-            }
-            continue
-
-        all_mismatches.extend(mismatches)
-        yield {
-            "batch_index": i,
-            "total_batches": total_batches,
-            "scenario_ids": [b["id"] for b in batch],
-            "cached": cached,
-            "batch_mismatches": mismatches,
-            "mismatches_so_far": list(all_mismatches),
-            "progress": (i + 1) / total_batches,
-        }
-
-
 def annotate_mismatches(report, content_blocks, sheet_name):
     blocks_by_range = {(b["sheet"], b["row_range"][0], b["row_range"][1]): b for b in content_blocks}
     for m in report.get("mismatches", []):

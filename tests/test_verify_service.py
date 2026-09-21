@@ -5,7 +5,6 @@ from app.domain.qc.verify_service import (
     annotate_mismatches,
     pack_batches,
     verify_blocks,
-    verify_blocks_stream,
 )
 from app.infra.llm.prompts import VERIFY_SYSTEM
 from app.infra.llm.tokens import estimate_tokens
@@ -105,50 +104,6 @@ def test_pack_batches_respects_custom_min_max():
     batches = pack_batches(blocks(6), [], context_window=1_000_000, reserved_output_tokens=0, max_scenarios_per_batch=2)
     assert all(len(b) <= 2 for b in batches)
     assert sum(len(b) for b in batches) == 6
-
-
-def test_verify_blocks_stream_yields_progress_per_batch():
-    llm = FakeLLM([
-        json.dumps({"mismatches": [{"n": 1}]}),
-        json.dumps({"mismatches": [{"n": 2}]}),
-        json.dumps({"mismatches": []}),
-    ])
-    cache = MemoryCache()
-    events = list(
-        verify_blocks_stream(
-            llm, blocks(6), [], cache=cache,
-            context_window=1_000_000, reserved_output_tokens=0, max_scenarios_per_batch=2,
-        )
-    )
-    assert len(events) == 3
-    assert events[0]["batch_index"] == 0
-    assert events[0]["total_batches"] == 3
-    assert events[-1]["progress"] == 1.0
-    assert events[0]["mismatches_so_far"] == [{"n": 1}]
-    assert events[1]["mismatches_so_far"] == [{"n": 1}, {"n": 2}]
-    assert events[2]["mismatches_so_far"] == [{"n": 1}, {"n": 2}]
-
-
-def test_verify_blocks_stream_continues_after_batch_error():
-    llm = FakeLLM([json.dumps({"mismatches": [{"n": 1}]})])
-
-    class ExplodingLLM(FakeLLM):
-        def complete_json(self, system, user):
-            self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("boom")
-            return super().complete_json(system, user)
-
-    exploding = ExplodingLLM([json.dumps({"mismatches": [{"n": 2}]})])
-    events = list(
-        verify_blocks_stream(
-            exploding, blocks(2), [], cache=MemoryCache(),
-            context_window=1_000_000, reserved_output_tokens=0, max_scenarios_per_batch=1,
-        )
-    )
-    assert len(events) == 2
-    assert "error" in events[0]
-    assert events[1]["batch_mismatches"] == [{"n": 2}]
 
 
 def test_verify_blocks_default_caps_at_4_scenarios_per_batch():

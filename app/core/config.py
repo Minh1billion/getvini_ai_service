@@ -14,6 +14,11 @@ class Settings(BaseSettings):
 
     groq_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    qc_default_provider: str = "groq"
+    qc_model_groq: str = "openai/gpt-oss-120b"
+    qc_model_openai: str = "gpt-4o-mini"
+    qc_model_openrouter: str = "openai/gpt-4o-mini"
     qc_verify_model: str = "openai/gpt-oss-120b"
     qc_llm_seed: int = 7
     qc_llm_max_retries: int = 3
@@ -25,6 +30,9 @@ class Settings(BaseSettings):
     qc_llm_reserved_output_tokens: int = 1500
     qc_llm_min_scenarios_per_batch: int = 1
     qc_llm_max_scenarios_per_batch: int = 4
+
+    qc_queue_workers: int = 2
+    qc_queue_max_pending: int = 50
 
 
 @lru_cache

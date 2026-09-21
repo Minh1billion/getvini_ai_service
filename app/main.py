@@ -6,6 +6,7 @@ from app.api.qc_router import router as qc_router
 from app.api.spellcheck_router import router as spellcheck_router
 from app.core.logging import setup_logging
 from app.domain.spellcheck.service import register_dictionaries
+from app.infra.jobs.qc_queue import start_workers
 
 setup_logging()
 
@@ -13,6 +14,7 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     register_dictionaries()
+    start_workers()
     yield
 
 

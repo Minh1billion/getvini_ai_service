@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -26,3 +26,18 @@ class QCRunResponse(BaseModel):
     scanned_scenarios: List[ScenarioInfo]
     mismatch_report: MismatchReport
     models: QCModels
+
+
+class QCSubmitResponse(BaseModel):
+    job_id: str
+    total: int
+
+
+class QCJobResponse(BaseModel):
+    status: str
+    total: int
+    content_blocks: Optional[List[ContentBlock]] = None
+    scanned_scenarios: Optional[List[ScenarioInfo]] = None
+    mismatch_report: Optional[MismatchReport] = None
+    models: Optional[QCModels] = None
+    error: Optional[str] = None

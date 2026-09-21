@@ -4,31 +4,25 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
 
-from app.api.schemas.qc import QCRunResponse
+from app.api.schemas.qc import QCJobResponse, QCSubmitResponse
 from app.api.schemas.spellcheck import SheetsResponse
 from app.common.upload import save_upload
-from app.core.config import get_settings
-from app.domain.qc.verify_service import annotate_mismatches, verify_blocks, verify_blocks_stream
+from app.domain.qc.verify_service import annotate_mismatches, verify_blocks
 from app.domain.sheet_structure.scenario import describe_workbook, scan_content_blocks, scan_sheet
+from app.infra.jobs.qc_queue import QcQueueFullError, submit as submit_qc_job
+from app.infra.jobs.qc_store import get_qc_store
 from app.infra.llm.client import LLMClient
 from app.infra.sheet_reader import read_sheet
 
 router = APIRouter(prefix="/qc", tags=["qc"])
 
 
-async def _load_product_info(product_info: Optional[str], product_info_file: Optional[UploadFile]):
-    if product_info_file is not None:
-        raw, label = await product_info_file.read(), "product_info_file"
-    elif product_info:
-        raw, label = product_info, "product_info"
-    else:
-        raise HTTPException(status_code=400, detail="Cần cung cấp product_info hoặc product_info_file")
+def _safe_remove(path):
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"{label} không hợp lệ: {e}")
+        os.remove(path)
+    except OSError:
+        pass
 
 
 @router.post("/sheets", response_model=SheetsResponse)
@@ -49,23 +43,26 @@ async def qc_sheets(
     raise HTTPException(status_code=400, detail="Cần cung cấp file hoặc url")
 
 
-async def _prepare_qc_run(
-    sheet_name,
-    file,
-    url,
-    product_info,
-    product_info_file,
-    provider,
-    model,
-    verify_model,
-    api_key,
-    scenario_ids,
+@router.post("/run", response_model=QCSubmitResponse)
+async def qc_run(
+    sheet_name: str = Form(...),
+    file: Optional[UploadFile] = File(None),
+    url: Optional[str] = Form(None),
+    product_info: str = Form(...),
+    provider: Optional[str] = Form(None),
+    verify_model: Optional[str] = Form(None),
+    scenario_ids: Optional[str] = Form(None),
+    context_window: Optional[int] = Form(None),
+    max_scenarios_per_batch: Optional[int] = Form(None),
 ):
     selected_scenario_ids = {s.strip() for s in scenario_ids.split(",") if s.strip()} if scenario_ids else None
     if not file and not url:
         raise HTTPException(status_code=400, detail="Cần cung cấp file hoặc url")
 
-    info = await _load_product_info(product_info, product_info_file)
+    try:
+        info = json.loads(product_info)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"product_info không hợp lệ: {e}")
 
     tmp_path = None
     source = url
@@ -81,7 +78,7 @@ async def _prepare_qc_run(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        verify_llm = LLMClient(provider=provider, model=verify_model or model or get_settings().qc_verify_model, api_key=api_key)
+        verify_llm = LLMClient(provider=provider, model=verify_model)
     except Exception as e:
         if tmp_path:
             _safe_remove(tmp_path)
@@ -90,104 +87,59 @@ async def _prepare_qc_run(
     content_blocks = await asyncio.to_thread(scan_content_blocks, sheet_name, rows, selected_scenario_ids)
     scanned_scenarios = await asyncio.to_thread(scan_sheet, sheet_name, rows)
 
-    return content_blocks, scanned_scenarios, verify_llm, info, tmp_path
-
-
-def _safe_remove(path):
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-
-
-@router.post("/run", response_model=QCRunResponse)
-async def qc_run(
-    sheet_name: str = Form(...),
-    file: Optional[UploadFile] = File(None),
-    url: Optional[str] = Form(None),
-    product_info: Optional[str] = Form(None),
-    product_info_file: Optional[UploadFile] = File(None),
-    provider: str = Form("groq"),
-    model: Optional[str] = Form(None),
-    verify_model: Optional[str] = Form(None),
-    api_key: Optional[str] = Form(None),
-    batch_size: Optional[int] = Form(None),
-    scenario_ids: Optional[str] = Form(None),
-):
-    content_blocks, scanned_scenarios, verify_llm, info, tmp_path = await _prepare_qc_run(
-        sheet_name, file, url, product_info, product_info_file, provider, model, verify_model, api_key, scenario_ids,
-    )
     if tmp_path:
         _safe_remove(tmp_path)
+
+    store = get_qc_store()
+    job_id = store.create(len(content_blocks))
 
     models = {"verify": verify_llm.model}
 
     if not content_blocks:
-        return {"content_blocks": content_blocks, "scanned_scenarios": scanned_scenarios, "mismatch_report": {"mismatches": []}, "models": models}
+        store.update(
+            job_id,
+            status="done",
+            content_blocks=content_blocks,
+            scanned_scenarios=scanned_scenarios,
+            mismatch_report={"mismatches": []},
+            models=models,
+        )
+        return {"job_id": job_id, "total": 0}
+
+    def run_job():
+        store.update(job_id, status="running")
+        try:
+            report = verify_blocks(
+                verify_llm,
+                content_blocks,
+                info,
+                context_window=context_window,
+                max_scenarios_per_batch=max_scenarios_per_batch,
+            )
+            annotated = annotate_mismatches(report, content_blocks, sheet_name)
+            store.update(
+                job_id,
+                status="done",
+                content_blocks=content_blocks,
+                scanned_scenarios=scanned_scenarios,
+                mismatch_report=annotated,
+                models=models,
+            )
+        except Exception as e:
+            store.update(job_id, status="error", error=str(e))
 
     try:
-        report = await asyncio.to_thread(verify_blocks, verify_llm, content_blocks, info, batch_size)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Lỗi khi gọi LLM: {e}")
+        submit_qc_job(run_job)
+    except QcQueueFullError:
+        store.update(job_id, status="error", error="Hệ thống đang quá tải, vui lòng thử lại sau")
+        raise HTTPException(status_code=503, detail="Hệ thống đang quá tải, vui lòng thử lại sau")
 
-    return {
-        "content_blocks": content_blocks,
-        "scanned_scenarios": scanned_scenarios,
-        "mismatch_report": annotate_mismatches(report, content_blocks, sheet_name),
-        "models": models,
-    }
+    return {"job_id": job_id, "total": len(content_blocks)}
 
 
-@router.post("/run/stream")
-async def qc_run_stream(
-    sheet_name: str = Form(...),
-    file: Optional[UploadFile] = File(None),
-    url: Optional[str] = Form(None),
-    product_info: Optional[str] = Form(None),
-    product_info_file: Optional[UploadFile] = File(None),
-    provider: str = Form("groq"),
-    model: Optional[str] = Form(None),
-    verify_model: Optional[str] = Form(None),
-    api_key: Optional[str] = Form(None),
-    scenario_ids: Optional[str] = Form(None),
-    context_window: Optional[int] = Form(None),
-):
-    content_blocks, scanned_scenarios, verify_llm, info, tmp_path = await _prepare_qc_run(
-        sheet_name, file, url, product_info, product_info_file, provider, model, verify_model, api_key, scenario_ids,
-    )
-    models = {"verify": verify_llm.model}
-
-    async def event_source():
-        try:
-            yield f"data: {json.dumps({'content_blocks': content_blocks, 'scanned_scenarios': scanned_scenarios, 'models': models}, ensure_ascii=False)}\n\n"
-
-            if not content_blocks:
-                yield f"data: {json.dumps({'done': True, 'mismatch_report': {'mismatches': []}}, ensure_ascii=False)}\n\n"
-                return
-
-            gen = verify_blocks_stream(verify_llm, content_blocks, info, context_window=context_window)
-
-            def next_item():
-                try:
-                    return next(gen)
-                except StopIteration:
-                    return None
-
-            all_mismatches = []
-            while True:
-                item = await asyncio.to_thread(next_item)
-                if item is None:
-                    break
-                if "batch_mismatches" in item:
-                    annotated = annotate_mismatches({"mismatches": item["batch_mismatches"]}, content_blocks, sheet_name)
-                    item["batch_mismatches"] = annotated["mismatches"]
-                    all_mismatches.extend(annotated["mismatches"])
-                    item["mismatches_so_far"] = list(all_mismatches)
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-
-            yield f"data: {json.dumps({'done': True, 'mismatch_report': {'mismatches': all_mismatches}}, ensure_ascii=False)}\n\n"
-        finally:
-            if tmp_path:
-                _safe_remove(tmp_path)
-
-    return StreamingResponse(event_source(), media_type="text/event-stream")
+@router.get("/run/{job_id}", response_model=QCJobResponse)
+async def qc_run_status(job_id: str):
+    job = get_qc_store().get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job

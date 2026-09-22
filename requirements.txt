@@ -4,3 +4,7 @@ python-multipart
 reportlab
 openai
 pydantic-settings
+pypdf
+pdfplumber
+python-docx
+httpx

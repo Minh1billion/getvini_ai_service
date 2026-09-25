@@ -59,9 +59,13 @@ def scan_sheet(sheet_name, rows):
     ]
 
 
-def scan_sheet_units(sheet_name, rows, multi_sheet):
+def scan_sheet_units(sheet_name, rows, multi_sheet, blocks=None, scenario_ids=None):
+    blocks = blocks or []
     units = []
     for r, vals in rows:
+        block = next((b for b in blocks if b["startRow"] is not None and b["startRow"] <= r <= b["endRow"]), None)
+        if scenario_ids is not None and (block is None or block["id"] not in scenario_ids):
+            continue
         for c, v in enumerate(vals):
             if not _has_value(v):
                 continue
@@ -72,8 +76,8 @@ def scan_sheet_units(sheet_name, rows, multi_sheet):
                 "location": location,
                 "text": str(v),
                 "sheet": sheet_name,
-                "scenario": None,
-                "scenarioId": None,
+                "scenario": block["scenarioLabel"] if block else None,
+                "scenarioId": block["id"] if block else None,
             })
     return units
 

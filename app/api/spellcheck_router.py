@@ -17,10 +17,11 @@ from app.infra.pdf.report import build_spellcheck_pdf
 router = APIRouter(prefix="/check", tags=["spellcheck"])
 
 
-async def _prepare(file: UploadFile, sheet_names: Optional[str]):
+async def _prepare(file: UploadFile, sheet_names: Optional[str], scenario_ids: Optional[str] = None):
     path, ext = await save_upload(file)
     try:
-        units, scanned_scenarios = await asyncio.to_thread(service.extract_units, path, ext, sheet_names)
+        ids = {s.strip() for s in scenario_ids.split(",") if s.strip()} if scenario_ids else None
+        units, scanned_scenarios = await asyncio.to_thread(service.extract_units, path, ext, sheet_names, ids)
     except Exception as e:
         os.remove(path)
         raise HTTPException(status_code=400, detail=str(e))
@@ -46,8 +47,9 @@ async def check_start(
     lang: str = Form("both"),
     sheet_names: Optional[str] = Form(None),
     whitelist: Optional[str] = Form(None),
+    scenario_ids: Optional[str] = Form(None),
 ):
-    path, units, scanned_scenarios = await _prepare(file, sheet_names)
+    path, units, scanned_scenarios = await _prepare(file, sheet_names, scenario_ids)
     job_id, total = runner.start_job(get_store(), path, units, scanned_scenarios, service.parse_whitelist(whitelist), lang)
     return {"job_id": job_id, "total": total}
 
@@ -58,8 +60,9 @@ async def check_stream(
     lang: str = Form("both"),
     sheet_names: Optional[str] = Form(None),
     whitelist: Optional[str] = Form(None),
+    scenario_ids: Optional[str] = Form(None),
 ):
-    path, units, scanned_scenarios = await _prepare(file, sheet_names)
+    path, units, scanned_scenarios = await _prepare(file, sheet_names, scenario_ids)
 
     async def event_source():
         async for payload in runner.stream_job(get_store(), path, units, scanned_scenarios, service.parse_whitelist(whitelist), lang):

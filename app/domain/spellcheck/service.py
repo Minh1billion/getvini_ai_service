@@ -47,7 +47,7 @@ def check_unit(unit: dict, whitelist, lang: str):
     return errors
 
 
-def extract_units(path: str, ext: str, sheet_names: Optional[str]):
+def extract_units(path: str, ext: str, sheet_names: Optional[str], scenario_ids: Optional[set] = None):
     units = []
     scanned_scenarios = []
     if ext in SPREADSHEET_EXTS:
@@ -55,11 +55,23 @@ def extract_units(path: str, ext: str, sheet_names: Optional[str]):
         multi = len(selected_sheets) > 1
         for sheet in selected_sheets:
             rows = read_sheet(path, sheet)
-            units.extend(scan_sheet_units(sheet, rows, multi))
-            scanned_scenarios.extend(scan_sheet(sheet, rows))
+            sheet_blocks = scan_sheet(sheet, rows)
+            scanned_scenarios.extend(sheet_blocks)
+
+            sheet_scenario_ids = None
+            if scenario_ids is not None:
+                sheet_scenario_ids = {sid for sid in scenario_ids if sid.startswith(f"{sheet}::")}
+                if sheet_blocks and not sheet_scenario_ids:
+                    # Sheet has scenarios but none of them were selected -> don't scan this sheet
+                    continue
+                if not sheet_blocks:
+                    # Sheet has no scenario markup at all -> nothing to restrict by, scan it whole
+                    sheet_scenario_ids = None
+
+            units.extend(scan_sheet_units(sheet, rows, multi, blocks=sheet_blocks, scenario_ids=sheet_scenario_ids))
         logger.info(
-            "[SHEET_DEBUG] extract_units requested_sheet_names=%s resolved_sheets=%s total_units=%s",
-            sheet_names, selected_sheets, len(units),
+            "[SHEET_DEBUG] extract_units requested_sheet_names=%s resolved_sheets=%s scenario_ids=%s total_units=%s",
+            sheet_names, selected_sheets, scenario_ids, len(units),
         )
     else:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:

@@ -6,7 +6,7 @@ import structural
 from app.common.upload import SPREADSHEET_EXTS
 from app.core.config import DICTIONARIES_DIR
 from app.domain.sheet_structure.scenario import scan_sheet, scan_sheet_units
-from app.infra.sheet_reader import read_sheet, resolve_sheet_names
+from app.infra.sheet_reader import read_merges, read_sheet, resolve_sheet_names
 
 logger = logging.getLogger("spellcheck.service")
 
@@ -55,7 +55,8 @@ def extract_units(path: str, ext: str, sheet_names: Optional[str], scenario_ids:
         multi = len(selected_sheets) > 1
         for sheet in selected_sheets:
             rows = read_sheet(path, sheet)
-            sheet_blocks = scan_sheet(sheet, rows)
+            merges = read_merges(path, sheet)
+            sheet_blocks = scan_sheet(sheet, rows, merges)
             scanned_scenarios.extend(sheet_blocks)
 
             sheet_scenario_ids = None

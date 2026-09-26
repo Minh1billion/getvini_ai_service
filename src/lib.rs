@@ -17,6 +17,11 @@ mod structural {
     }
 
     #[pyfunction]
+    fn read_merges(source: &str, sheet_name: &str) -> PyResult<String> {
+        io::read_merges(source, sheet_name)
+    }
+
+    #[pyfunction]
     fn tokenize(text: &str) -> Vec<String> {
         tokenizer::tokenize(text)
     }
@@ -40,5 +45,13 @@ mod structural {
     #[pyfunction]
     fn scan_marker_blocks(rows_json: &str, pattern: &str) -> PyResult<String> {
         grid_scan::scan_marker_blocks(rows_json, pattern).map_err(PyValueError::new_err)
+    }
+
+    /// Phiên bản mới: dùng vùng gộp (merge) của chính ô tiêu đề "Kịch bản..." làm
+    /// phạm vi cột cố định. Nếu tiêu đề không gộp, tự rơi về cách đoán độ rộng cũ
+    /// (giữ nguyên hành vi hiện tại cho các sheet chưa dùng merge).
+    #[pyfunction]
+    fn scan_marker_blocks_by_merge(rows_json: &str, merges_json: &str, pattern: &str) -> PyResult<String> {
+        grid_scan::scan_marker_blocks_by_merge(rows_json, merges_json, pattern).map_err(PyValueError::new_err)
     }
 }

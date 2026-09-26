@@ -53,6 +53,13 @@ def read_sheet(source, sheet_name):
     return rows
 
 
+def read_merges(source, sheet_name):
+    """Trả về danh sách vùng ô gộp: [(row_start, col_start, row_end, col_end), ...],
+    row đã +1 để khớp với hệ toạ độ của read_sheet/rows ở trên, col giữ 0-based."""
+    raw = json.loads(structural.read_merges(source, sheet_name))
+    return [(r0 + 1, c0, r1 + 1, c1) for r0, c0, r1, c1 in raw]
+
+
 def rows_to_text(rows):
     lines = []
     for idx, row in rows:

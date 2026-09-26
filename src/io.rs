@@ -57,3 +57,35 @@ pub fn read_sheet(source: &str, sheet_name: &str) -> PyResult<String> {
 
     serde_json::to_string(&result).map_err(|e| PyValueError::new_err(e.to_string()))
 }
+
+/// Đọc danh sách vùng ô gộp (merge) của một sheet.
+/// Trả về JSON: [[row_start, col_start, row_end, col_end], ...] — tất cả 0-based, bao gồm cả hai đầu.
+pub fn read_merges(source: &str, sheet_name: &str) -> PyResult<String> {
+    let merges: Vec<((u32, u32), (u32, u32))> = if source.starts_with("http://") || source.starts_with("https://") {
+        let bytes = ureq::get(source)
+            .call()
+            .map_err(|e| PyIOError::new_err(e.to_string()))?
+            .body_mut()
+            .with_config()
+            .limit(100 * 1024 * 1024)
+            .read_to_vec()
+            .map_err(|e| PyIOError::new_err(e.to_string()))?;
+        let mut workbook: Xlsx<_> = Xlsx::new(Cursor::new(bytes))
+            .map_err(|e| PyIOError::new_err(e.to_string()))?;
+        workbook.worksheet_merge_cells(sheet_name).unwrap_or_default()
+    } else {
+        let file = File::open(source).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        let mut workbook: Xlsx<_> = Xlsx::new(BufReader::new(file))
+            .map_err(|e| PyIOError::new_err(e.to_string()))?;
+        workbook.worksheet_merge_cells(sheet_name).unwrap_or_default()
+    }
+    .iter()
+    .map(|d| (d.start, d.end))
+    .collect();
+
+    let result: Vec<Value> = merges
+        .into_iter()
+        .map(|((r0, c0), (r1, c1))| json!([r0, c0, r1, c1]))
+        .collect();
+    serde_json::to_string(&result).map_err(|e| PyValueError::new_err(e.to_string()))
+}

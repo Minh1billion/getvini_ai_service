@@ -13,7 +13,7 @@ from app.domain.sheet_structure.scenario import describe_workbook, scan_content_
 from app.infra.jobs.qc_queue import QcQueueFullError, submit as submit_qc_job
 from app.infra.jobs.qc_store import get_qc_store
 from app.infra.llm.client import LLMClient
-from app.infra.sheet_reader import read_sheet
+from app.infra.sheet_reader import read_merges, read_sheet
 
 router = APIRouter(prefix="/qc", tags=["qc"])
 
@@ -72,6 +72,7 @@ async def qc_run(
 
     try:
         rows = await asyncio.to_thread(read_sheet, source, sheet_name)
+        merges = await asyncio.to_thread(read_merges, source, sheet_name)
     except Exception as e:
         if tmp_path:
             _safe_remove(tmp_path)
@@ -84,8 +85,8 @@ async def qc_run(
             _safe_remove(tmp_path)
         raise HTTPException(status_code=400, detail=str(e))
 
-    content_blocks = await asyncio.to_thread(scan_content_blocks, sheet_name, rows, selected_scenario_ids)
-    scanned_scenarios = await asyncio.to_thread(scan_sheet, sheet_name, rows)
+    content_blocks = await asyncio.to_thread(scan_content_blocks, sheet_name, rows, selected_scenario_ids, merges)
+    scanned_scenarios = await asyncio.to_thread(scan_sheet, sheet_name, rows, merges)
 
     if tmp_path:
         _safe_remove(tmp_path)

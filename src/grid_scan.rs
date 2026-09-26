@@ -43,20 +43,20 @@ fn col_letters_to_index(s: &str) -> Option<usize> {
 /// Trả về (tên kịch bản đã bỏ phần khai báo, phạm vi cột nếu hợp lệ).
 fn parse_declared_range(raw: &str) -> (String, Option<(usize, usize)>) {
     let trimmed = raw.trim();
-    if trimmed.ends_with(']') {
-        if let Some(open) = trimmed.rfind('[') {
-            let inner = trimmed[open + 1..trimmed.len() - 1].trim();
-            let label = trimmed[..open].trim().to_string();
-            let range = match inner.split_once(':') {
-                Some((a, b)) => match (col_letters_to_index(a.trim()), col_letters_to_index(b.trim())) {
-                    (Some(x), Some(y)) => Some((x.min(y), x.max(y))),
-                    _ => None,
-                },
-                None => col_letters_to_index(inner).map(|c| (c, c)),
-            };
-            if let Some(r) = range {
-                return (label, Some(r));
-            }
+    if trimmed.ends_with(']')
+        && let Some(open) = trimmed.rfind('[')
+    {
+        let inner = trimmed[open + 1..trimmed.len() - 1].trim();
+        let label = trimmed[..open].trim().to_string();
+        let range = match inner.split_once(':') {
+            Some((a, b)) => match (col_letters_to_index(a.trim()), col_letters_to_index(b.trim())) {
+                (Some(x), Some(y)) => Some((x.min(y), x.max(y))),
+                _ => None,
+            },
+            None => col_letters_to_index(inner).map(|c| (c, c)),
+        };
+        if let Some(r) = range {
+            return (label, Some(r));
         }
     }
     (trimmed.to_string(), None)
@@ -253,8 +253,8 @@ fn scan_by_merge(rows: &Rows, re: &Regex, merges: &[MergeRect]) -> Vec<Value> {
             let blocked = markers.iter().enumerate().any(|(j, n)| {
                 j != i
                     && n.row == r
-                    && ranges[j].map_or((n.col, n.col), |x| x).0 <= ce
-                    && ranges[j].map_or((n.col, n.col), |x| x).1 >= cs
+                    && ranges[j].unwrap_or((n.col, n.col)).0 <= ce
+                    && ranges[j].unwrap_or((n.col, n.col)).1 >= cs
             });
             if blocked {
                 break;

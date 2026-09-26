@@ -72,12 +72,20 @@ pub fn read_merges(source: &str, sheet_name: &str) -> PyResult<String> {
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
         let mut workbook: Xlsx<_> = Xlsx::new(Cursor::new(bytes))
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
-        workbook.worksheet_merge_cells(sheet_name).unwrap_or_default()
+        workbook
+            .worksheet_merge_cells(sheet_name)
+            .transpose()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?
+            .unwrap_or_default()
     } else {
         let file = File::open(source).map_err(|e| PyIOError::new_err(e.to_string()))?;
         let mut workbook: Xlsx<_> = Xlsx::new(BufReader::new(file))
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
-        workbook.worksheet_merge_cells(sheet_name).unwrap_or_default()
+        workbook
+            .worksheet_merge_cells(sheet_name)
+            .transpose()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?
+            .unwrap_or_default()
     }
     .iter()
     .map(|d| (d.start, d.end))
